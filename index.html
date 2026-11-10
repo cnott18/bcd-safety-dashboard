@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Safety — BCDCOG Performance Monitoring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+	--cyan:#2A9AB5;
+    --teal:#06A6C8;
+    --driver:#78206E;      /* annotated color mapping — set inside the Power BI visual */
+    --passenger:#4EA72E;
+    --pedestrian:#06A6C8;
+    --bicyclist:#E97132;
+    --ink:#1b1b1b;
+    --body:#3a3a3a;
+    --muted:#6b6b6b;
+    --line:#e2e2e2;
+    --panel:#f4f4f4;
+    --panel-2:#f8f8f8;
+    --tip:#2f3336;
+    --maxw:1180px;
+    --font:'Public Sans',system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+
+    /* --- Power BI publish-to-web sizing ---------------------------------
+       The chart slots below are sized by RATIO, not a fixed height, so the
+       embedded report fills the full width with no blank side bands.
+       --pbi-page-ratio = report page height ÷ width, as a percent:
+         16:9  (1280×720) → 56.25%   (default)
+         16:10 (1280×800) → 62.5%
+         4:3   (1024×768) → 75%
+         1280×540 (wide)  → 42.19%
+       Set it to match your Power BI canvas (Format ▸ Canvas ▸ Page size).
+       --pbi-footer reserves room for the grey publish-to-web footer bar. */
+    --pbi-page-ratio:79.5%;   /* 636 ÷ 800 → matches this report's 800×636 canvas (default/maps) */
+    --pbi-footer:40px;
+    /* Per-chart height overrides (lower % = shorter iframe = less whitespace).
+       Nudge these two to trim the blank area inside each Power BI report:
+         --pbi-ratio-perf  : Serious & Fatal Injuries  (trims bottom whitespace)
+         --pbi-ratio-target: Change in Traffic Fatalities (trims top+bottom equally,
+                             since Power BI centers the report in the frame) */
+    --pbi-ratio-perf:60%;
+    --pbi-ratio-target:66%;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;font-family:var(--font);color:var(--body);background:#fff;
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+
+  /* ---------- Masthead ---------- */
+  .masthead{padding:26px 0 14px}
+  .logo{display:inline-flex;align-items:center;gap:2px;text-decoration:none}
+  .logo img,.logo svg{display:block;height:40px;width:auto}
+  .safety-bar{
+    background:var(--teal);color:#fff;border-radius:2px;
+    padding:16px 22px;font-weight:700;font-size:22px;letter-spacing:.2px;
+  }
+
+  /* ---------- Layout ---------- */
+  .layout{
+    display:grid;grid-template-columns:212px 1fr;gap:44px;
+    padding:34px 0 70px;align-items:start;
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{position:sticky;top:20px;align-self:start}
+  .side-h{font-weight:700;color:var(--ink);font-size:18px;margin:0 0 12px}
+  .index{list-style:none;margin:0 0 30px;padding:0;position:relative}
+  .index::before{content:"";position:absolute;left:8px;top:9px;bottom:9px;width:2px;background:var(--line)}
+  .index li{position:relative;padding:6px 0 6px 26px}
+  .index li::before{
+    content:"";position:absolute;left:0;top:9px;width:14px;height:14px;border-radius:50%;
+    background:#fff;border:2px solid #c7c7c7;
+  }
+  .index a{color:var(--body);text-decoration:none;font-size:14.5px}
+  .index a:hover,.index a:focus-visible{color:var(--teal)}
+  .index li[aria-current="true"]::before{border-color:var(--teal);background:var(--teal)}
+
+  .plans{list-style:none;margin:0;padding:0}
+  .plans li{padding:7px 0 7px 26px;position:relative}
+  .plans li::before{
+    content:"";position:absolute;left:0;top:10px;width:14px;height:14px;border-radius:50%;
+    background:#fff;border:2px solid #c7c7c7;
+  }
+  .plans a{color:var(--body);text-decoration:none;font-size:14.5px;display:inline-flex;align-items:center;gap:5px}
+  .plans a:hover,.plans a:focus-visible{color:var(--teal)}
+  .plans a:hover .ext,.plans a:focus-visible .ext{opacity:1}
+  .ext{opacity:.45;flex:none}
+
+  /* ---------- Content ---------- */
+  main{min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:16px}
+  h2.sec{font-size:30px;font-weight:800;color:var(--ink);margin:0 0 8px;letter-spacing:-.4px}
+  h3.lede{font-size:17px;font-weight:700;color:var(--ink);margin:0 0 12px}
+  p.copy{max-width:95ch;margin:0 0 12px;color:var(--body)}
+
+  /* ---------- Panels / viz shell ---------- */
+  .panel{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:18px 18px 16px;position:relative}
+  .panel-title{font-weight:700;color:var(--ink);font-size:18px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .panel-sub{margin:0 0 12px;font-weight:400;color:var(--muted);font-size:13px;line-height:1.3}
+  .expand{
+    position:absolute;top:14px;right:14px;border:0;background:transparent;cursor:pointer;
+    color:#8a8a8a;padding:4px;border-radius:4px;line-height:0;z-index:6;
+  }
+  .expand:hover{color:var(--ink);background:#ececec}
+  .panel:fullscreen{background:#fff;padding:34px;display:flex;flex-direction:column;justify-content:center}
+  .panel:fullscreen .embed{height:100%;flex:1;padding-bottom:0}
+
+  /* ---------- Embed slots (Power BI / ArcGIS iframes) ---------- */
+  .embed{position:relative;width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  /* Ratio-based height: fills full width, no blank side bands.
+     Height derives from width via padding-bottom (percentage of width),
+     plus footer allowance for the publish-to-web bar. */
+  .embed.chart{height:0;padding-bottom:calc(var(--pbi-page-ratio) + var(--pbi-footer))}
+  .embed.chart[data-embed="performance"]{padding-bottom:calc(var(--pbi-ratio-perf) + var(--pbi-footer))}
+  .embed.chart[data-embed="target"]{padding-bottom:calc(var(--pbi-ratio-target) + var(--pbi-footer))}
+  .embed.map-embed{flex:1;min-height:340px}
+  .embed > iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+  .embed .ph{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;text-align:center;color:#8a8a8a;padding:22px;border:2px dashed #d3d3d3;border-radius:6px;background:#fafafa;
+  }
+  .embed.ready .ph{display:none}
+  .ph svg{color:#c2c2c2}
+  .ph .ph-t{font-weight:700;color:#5f5f5f;font-size:14px}
+  .ph .ph-s{font-size:12.5px;max-width:40ch;line-height:1.5}
+  .ph code{background:#ececec;padding:1px 6px;border-radius:3px;font-size:11.5px;color:#444}
+
+  /* ---------- Map row ---------- */
+  .map-row{display:grid;grid-template-columns:1fr 176px;gap:14px;align-items:stretch}
+  .map-row .panel{display:flex;flex-direction:column;padding:0}
+  .map-row .panel .expand{top:10px;right:10px}
+
+  .maplegend{border:1px solid var(--line);border-radius:6px;background:var(--panel-2);padding:14px 14px;font-size:12px;color:var(--body)}
+  .maplegend h4{margin:0 0 8px;font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.3}
+  .ln-scale{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+  .ln-scale .row{display:flex;align-items:center;gap:9px}
+  .ln-scale .swatch{flex:none;width:34px;border-radius:2px}
+  .gradbar{width:16px;height:120px;border-radius:3px;margin:4px 0}
+  .grad-wrap{display:flex;gap:8px;align-items:stretch}
+  .grad-ticks{display:flex;flex-direction:column;justify-content:space-between;font-size:11px;color:var(--muted)}
+  .fine{font-size:10.5px;color:var(--muted);font-style:italic;margin-top:6px}
+  .funded{display:flex;align-items:center;gap:9px;margin-top:2px}
+  .funded .swatch{width:34px;height:3px;background:var(--cyan);border-radius:2px;flex:none}
+
+  /* ---------- Project pane (navigable) ---------- */
+  .proj-pane{margin:16px 0 0}
+  .proj-pane:focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:7px}
+  .proj-head{background:var(--tip);color:#fff;border-radius:5px;padding:10px 12px 10px 16px;font-size:15px;margin:0 0 12px;
+    display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .proj-head b{font-weight:700}
+  .proj-head-main{min-width:0}
+  .proj-head-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .proj-head-title a{color:#fff;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.4)}
+  .proj-head-title a:hover{border-bottom-color:#fff}
+  .proj-head-sub{display:block;font-size:12px;color:#c7ccce;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .proj-nav{display:flex;align-items:center;gap:8px;flex:none}
+  .proj-count{font-size:13px;font-weight:600;color:#dfe3e4;min-width:46px;text-align:center;font-variant-numeric:tabular-nums}
+  .proj-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:5px;
+    border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;line-height:0;transition:background .12s,border-color .12s}
+  .proj-btn:hover{background:rgba(255,255,255,.2)}
+  .proj-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .proj-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .proj-cell{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 13px;text-align:center;
+    height:166px;overflow:hidden}
+  .proj-cell .k{font-weight:700;color:var(--ink);font-size:13.5px;margin-bottom:6px}
+  .proj-cell .v{font-size:13px;color:var(--body);line-height:1.4}
+  .proj-cell.proj-desc .v{text-align:left;max-height:110px;overflow:auto}
+  .proj-cell.proj-desc .v::-webkit-scrollbar{width:7px}
+  .proj-cell.proj-desc .v::-webkit-scrollbar-thumb{background:#cdcdcd;border-radius:4px}
+  .proj-cell .v .muted{color:#9a9a9a}
+
+  /* ---------- Sources ---------- */
+  #sources p{max-width:74ch;margin:0 0 12px;font-size:14px}
+  #sources a{color:var(--teal);word-break:break-word}
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr;gap:26px}
+    .sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:24px}
+    .map-row{grid-template-columns:1fr}
+    .proj-grid{grid-template-columns:1fr 1fr}
+  }
+  @media (max-width:520px){
+    h2.sec{font-size:25px}
+    .proj-grid{grid-template-columns:1fr}
+    .sidebar{grid-template-columns:1fr}
+    /* chart slot stays ratio-based here too — no fixed height override */
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <!-- Masthead -->
+  <div class="masthead">
+    <a class="logo" href="https://data-bcdcog.opendata.arcgis.com/" target="_blank" rel="noopener"
+       aria-label="BCDCOG Open Data">
+      <!-- Official BCDCOG "data" logo (embedded as base64 so the file stays self-contained) -->
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAvAAAAEaCAYAAAB3kWMDAAAACXBIWXMAAC4jAAAuIwF4pT92AAAgAElEQVR4nO3dz48k6Z3X8Y+tkVlb3qleyysMRlTtssjsGFQ1DJmXcKrDBzhhdVliuexKnQPLKUFT8xdMzF8wNYc8O1vaGz9cDRcEWjlKuWFQpoyrpJVhD+AqLRKLtJhO28LIHJpDPNmdU5NZlT8i8vt9It4vqTTWeKbqM9VVkZ984vs88ZmXL18KAAAAQBw+ax0AAAAAwPoo8AAAAEBEKPAAAABARCjwAAAAQEQo8AAAAEBEKPAAAABARCjwAAAAQEQo8AAAAEBEKPAAAABARN6wDgAAAODBYDJ9JOlk4W9dDbudF1Z5gFU+8/LlS+sMAAAAtVso6Kmko/BxIulgjX/9VtJN+LhSWe7zykMCa6DAAwCAxhpMpqcqC3sq6biGL3EpKZd0Mex2rmr4/MCnUOABAECjhNLel/Rkz1/6VtKFpPNht3Oz56+NFqHAAwCA6A0m0yNJZyqL+zojMXW7VFnkL6yDoHko8AAAIFqhuGeSntomWelWUjbsdkbWQdAcFHgAABCdCIr7XbeSzliRRxUo8AAAIBrhJJkzSR9YZ9nSpcoiz4ZXbI0CDwAAohA2p55LOrTOUoEPh91OZh0CcaLAAwAA18Kq+0j7P1WmbteS+qzGY1OftQ4AAACwymAyTVU+OKlp5V0qz6X/4WAyPbMOgriwAg8AAFwKxfYj6xx78kzlbPwL6yDwjwIPAABcCSMz54rnhJmqXEtKKfF4CAUeAAC4Ecp7rnK8pI1mKks8c/FYiRl4AADgwmAyPVG7y7tUPkU2D98LYClW4AEAgLmF8n5gHMULVuKxEivwAADAFOV9KVbisRIFHgAAmKG834sSj6UYoQEAACbYsLq2maQjTqfBHCvwAABg7yjvG5mvxD+yDgIfKPAAAMDCSJT3TRyrPBsfoMADAID9GkymmaQn1jki9DQ8nRYtxww8AADYm8Fkeirpu9Y5Ivc2x0u2GwUeAADsxWAyPZJ0JU6c2dWtpBM2tbbXG9YBsL4k6Xl4t3VZFOPUOgQAIEojUd6rcKjye3lqnANGmIEHAAC1C7Pbj61zNMiTwWTatw4BGxR4AABQqzA6kxnHaKLz8L1Fy1DgAQBA3UZidKYOByq/t2gZCjwAAKhNGPNgdKY+jzlasn0o8AAAoBbhyaE8fKh+GaM07UKBBwAAdTkTozP7cCDeKLUKBR4AAFQurAh/YJ2jRZ6Eh2ShBSjwAACgDpl1gBY6D2NLaDgKPAAAqFRYfX9qnaOFDlWOLaHhKPAAAKBqmXWADV1L+lDSNyW9LenXwv/+tqRnkmZ20Tb2ARtam+8N6wAAAKA5Ilt9fyYpG3Y7N0v+vzz89UJ6dRxmpnKV27tMUt84A2pEgQcAVCZJen1JR8Yx8qIY58YZ2iyzDrCGS0n9FcV9qWG3M5I0Gkymmfxvzn06mExHw24ntw6CelDgAQBV6svHQ3ty6wBtFDZQel99f3/Y7Wx95OKw28kGk2mucmXe8xGZmaTUOANqwgw8AACoiucNlDNJ39ylvM+Fle1UvmfjHw8m09Q6BOpBgQcAADsLq+9eC/xMUlrlSMmw27mS/xI/sg6AelDgAQBAFU7lc6RkXt6vqv7EEZT4w7D5Fg1DgQcAAFXIrAOsUEt5nwufu1/X569AZh0A1aPAAwCAnQwm01P5PF7x3TrL+9yw27lQeY68R6zCNxAFHgAA7Mrj7PvzcPTjXgy7nUzS8319vQ1l1gFQLQo8AADYWnhwk4ejQxfNZDPW0pfPefhDTqRpFgo8AADYhcfV9/6w23mx7y8avubpvr/umjLrAKgOBR4AAGwlHB3Zt85xx2WYSTcRjqr82Orr34Nz4RuEAg8AALbl8ejIvnUAlavdHkdp+tYBUA0KPAAA2Ja38Zlnw27nxjpEGKXpW+dY4mnYs4DIUeABAMDGQhE8ts5xR2YdYC6M8Vxa51jC25subIECDwAAtuGtCLpYfb+jbx1giX7Yu4CIUeABAMA2+tYB7ji3DnBXeEPh7QFPB/J7Ug7WRIEHAAAbCU/29LR59XIfT1zd0rn8bWj1dvcEG6LAAwCATXlbwc2sA6wSNrR6uztwPJhMT6xDYHsUeAAAsLYwP/3EOseC63D2ulvDbieTdGud4w5W4SNGgQcAAJvoWwe4w9vq9iqZdYA7TtnMGi8KPAAA2ETfOsCC2bDbGVmHWEfI6WkVns2sEaPAAwCAtTg8+z2W1fe5zDrAHX3rANgOBR4AAKyrbx3gjpF1gA1dyNeJNI95MmucKPAAAGBdfesAC547fHDTvZyeSNO3DoDNUeABAMCDwrGDh9Y5FoysA2zJ27nwfesA2BwFHgAArKNvHWDB7bDbubAOsY2wCu8p+yFnwseHAg8AANbh6cSSkXWAHWXWAe7oWwfAZijwAADgXozPVCvM7l9a51jg6c0Z1kCBBwAAD+lbB1hwGdvm1RVG1gEWHA4m09Q6BNZHgQcAAA/xtEI7sg5QBYcPdupbB8D6KPAAAGAlh+MznjaA7mpkHWCBpzdpeAAFHgAA3Ce1DrDgWTjFpSlG1gEWHHAaTTwo8AAA4D596wALmrT67nEza986ANZDgQcAAEsNJtMjScfWOYJZrGe/P2BkHWABYzSRoMADAIBVPBW6JpZ3qfzv8vJkVh7qFAkKPAAAWCW1DrCgkQXe4ZNZ+9YB8DAKPAAA+JTBZPpI0hPrHEFTx2fmPP23pdYB8DAKPAAAWCa1DrDAU8GtXHhz4uVM+OOw9wGOUeABAMAyzL/vl6f/Rk9/9liCAg8AAJbxUuKaPj4zN7IOsMDLnz1WoMADAIBPCCeRHFjnCNpQ3jXsdq7kZ4zmcdgDAaco8AAqxewk0AieVmBbUeADT/+tnn4GcMcb1gEAxGEwmaaSjsJHGv720lW6wWR692/NJF1JehH+eiPpKqw4AfDHS3lry/jM3EjSe9YhglS+xnqwgAIPYKnBZHqq8gJ+Iunxjp/uYOFzvDqWLhT9S0m5pHzY7eQ7fh0AO3L29NXcOsA+Dbudq8Fkeivp0DqL/LyJwxIUeACSXp35fBo+9nn28+Pw8UEo9M9V3ka+CA84AbBfqXWABW1afZ+7kI9V+IPBZHrCnVKfWlfgk6R3pNcjAI9Uri5Km60wzscBpNdjAbmkm6IY3+yeEtifMBrTl/TUNskrT8LHdwaT6XNJo5bdQq9ckvROJJ3v6ct5WLntJ0kvtQ6xhbOiGHsoS55WXtv4u++lwEvla8OZdQh8WuMLfHjhShc+qthVvzgOMP/rB+HrSeVIwJXKUn9FqYc3C6vtmXzcql3liaQn4ZbySNI5q/JbeaTdx6BicijfP9ereDn1I7UOEFy28fd92O3kg8l0Jh+nAKXWAbBc4wp8kvQeqfyBm48CWPwCzEcC3guZrhVmfIti3MbVBDgRivtZ+PDw4rCuQ5Vvks8Gk+mFpGzY7dzYRgKah+Mj3biQj7uix4PJ9IjrrT+NKfBJ0psXdqvSfp/j8PFekvRmCvO9lHns02AyzRRfcb/rQOWL2tPBZPpM0lkbV+iAGjE+44OXAi9xGo1LURf4sNp+pnJGK5bbpa8KSJL0blX+kp4zZoO6hNNkzhXP78i6nko6HUym52K0BqiKlwJ/2+ZV32G3c7HkOF4rp6LAuxPlg5ySpHeUJL2RyrOkP1C8xeRQ5ZjNj5OkdxHppis4NZhMjwaTaS7pu4r3d+QhByqvAVfhjQqALYUROw+bkKV2r77PPbcOEKTWAfBpURX4heL+Y5WrbzGPAtz1RNL3kqSXU+Sxq8FkeqZyI3VbNi4eSvruYDK94EmwwNY8vQnOrQM44OVNzEE4rQyORFHgk6T3KEl6mV4X9yZ7LIo8tjSYTB+FVfeP1Kw3uOt6onI1nmPPgM2l1gHmODpWkq83MZ7e3EERFPgk6fX1elSmTeZF/iKcXQ/cK6yQ3Kg9q+6rHEj6KKzGezmWD4hBah0g8DI6YirsAbi2zhFQ4J1xW+DDuEwu6Ttq50ri3BNJV+EOBLBUOGHme2r378pdTyTdhGPxANwj/J542SuTWwdwxMudiEPGE31xWeCTpNe2+d2HzDfqAZ8QRmYuxM/HKgeSfshIDfCg1DrAAi+l1QNP3wtW4R1xVeDDrPuF2ju/C6wtjIfkKleacb+PBpPpyDoE4FhqHSBo9fGRdw27nStJM+scQWodAK+5KfBJ0jtRuepOGQEeEG53X8nPkW8xeDqYTK+YiweW8vLa62nF2Qsv3xMvPyOQkwIfNqrm8jN/B7gVynsufl+2cSwpZy4eeM3ZMxRy6wAO5dYB5pz9rLSaeYEPmzPbvlEVWMtCeef3ZXuUeOCTUusAcxwfuZSn70lqHQAl0wIfHsrE5jtgDZT3Sh2IEg/MpdYBAo6PXGLY7bwQx0niDrMCH8p70x/KBFSC8l4LSjxaLxwN6GUvTW4dwDEvq/AcJ+mESYGnvAPrC5suL0R5rwMlHm2XWgdYkFsHcMxLgZd8/cy01t4LPOUdWN/CUZFsWK0PJR5tlloHCG7DkYlYguMkcddeCzzlHdjYSH5ubzfZvMRzxCTaxstMc24dIAJeVuFT6wDYY4GnvAObGUymmTh3d58o8WiVcNfJy2iel3LqWW4dIDjkjqW9vRT4cM475R1YUzhrlxOa9u9YFAm0h5fVd8lPOfXM07UptQ7QdrUX+CTppSrPeQewhrDDf2Qco80eDybTkXUIYA9S6wDBdTgqEfdwdpxkah2g7Wot8EnSO5Kvd4xADDhxxt7TwWTatw4B1CWMij22zhHQE9bn5XvFCI2xulfgKSLABsLcO5tWfThnzhMNlloHWJBbB4iIlwLPefDGaivwSdI7F0UEWNtgMk3F3LsnB5Iu2NSKhvIy/z4bdju5dYhYcJwk5mop8GHu/b06PjfQRKEkjqxz4FMOxZ8Lmim1DhDk1gEilFsHCFLrAG1WeYFPkh5FBNjcmXhYk1dPmIdHk4TRMC/XGy8jITHJrQMEqXWANnujhs+Zyc+FAXAvvJgyOuPb+WAyzYfdzo11kC29kHS5p691LMl67OhW0o1xhm3s6yQWL+Mzkp8yGpPcOkBwOJhMH3GCkI1KC3yS9E7E6AywqXPrAHjQgco7i6ltjO0UxfhKe8qeJL1c9qebjIpinBln8MxLgb+N+E2xmWG3czWYTGfycUhIKu6imKh6Bb7JRWTZis4jsVEXOwijGdZlZxfXKleDrrR8xfNI5XFjqeL/XXk8mEzPht1Ok69zaLhwcoiX30WK3/Zy+XhSdyr+HE1UVuDD01ZjLiJznygkRTHO1/mXwuz/iV4XlhM14/uBmoSNqzGWwVuVuUeb3DoN/72nKuf9vRSITWWDyfSCVUNEzMvqu+RnFCRGuXwUeI7aNVJJgQ/lNavicxm5VHl7PC+K8c02n6Aoxi+05GIUTuQ5DR/sDcCiTD5uga7rUlK27ZFvoeyPJI3CkZmZ4nuTG/UoDSBHP7vDboeV2+3l1gGC2K7hjVHVKTQxnqAxk/SxpN8oinFaFOPRtuX9PkUxzotifFYU4yNJb4ev6eUMVxgJG1dj2S8yk/TusNtJqzqvedjt5MNuJ5X0Te1vc2VVHnMqDWIU7oJ5WLWVpOfWAWLm6Tz4sCCDPdu5wIfV97MKsuzLTNKHko5Csb7Z1xcuivFVUYzPVI7ZfCgnv3wwEcvozHNJR8NuZ1THJ18o8u8qrt+Hcx7whAgxPtMsV9YBgtQ6QBtVsQLfVzxjAM8lnRTFOAsjLyaKYvwinJBwpLLIo0UGk+mp4rjt+P6w2zndxxFh4Q3CkeJZjT9Q3GODaKfUOsCC3DpAA+TWAQLm4A1UUeBjWH2fSfp2UYxP97ni/pCFIv+2ys2zaLhINq7OJL2979NWht3Oi7Aa//4+v+4O3gujUEAsvKzA34YREOwmtw4QpNYB2minAh9OnvE++36tclzG7WaZMFpzIlbj28D7fpGZpNTyxTW8cfim4hip8f5mDJD06s6fl7vlbl+PY1LVnqQKHITjSbFHu67A96sIUaNnRTE+sRyX2URYjf+24igu2FC4wHl+4qp5eZ8LL0yp/P8uPA7FCPAutQ6wILcO0CBexg5T6wBts3WBD09d9TzH+6woxn3rEJsKdwpS+S8u2NzIOsA93JT3uZAlVXnuvGeswiMGXt5ozjg+slJertmpdYC22WUFvl9ViBpEWd7nFh57TolviAg2rroq73Mh06l8/y4cDibTGPYCoaXCXg0vo3uU92rl1gEC9gPtWRMLfNTlfY4S3xwRbFx912N5n1tYiff8u5BxrCQc61sHWECBr5aXa/cx18D92qrAJ0nP02aYRZdNKO9zCyUecfO8cfVZXWe8VymCEn+gOE7kQjt5GZ+R/KwYN8Kw27mRnzHD1DpAm2y7Au/pYjA3k89cOwkl/l3rHNiO842r14qodIYS7znvGStQ8MbZ+MzzfTxXooVy6wABYzR71KQCfxrLaTObKorxSNIz6xzYysg6wD36sb2YhrsFH1vnWOFAvkel0E6pdYAFjM/Uw8sYTWodoE02LvDh9Blv4zMfF8U4tw5RM88rj1jC+cbVDz3Pvd9n2O2cyc/RaXc95TxkONO3DrAgtw7QULl1gMDr610jbbMC7231faYWPNK8qXcXmsr5xtVb+c22Ls8n02TWAQDp1QjfsXWO4DrMa6NiYTHGxfVwMJmm1hnaYpsCn1YdYkdnlFs45HnjanSjM3eF/H3rHCuwCg8vPC24jawDNJyXO6qpdYC22KbAe7pFchvmwwE3nG9cfe7o8ds7CQ+DeW6dY4XMOgAgX29yc+sADZdbBwhS6wBtsVGBT5JeWlOObWXWAYAlRtYBVpipeXsp+nJy6/gOVuFhytn4zG2se24iklsHCDwt8jbapivwaR0htjRj9R3eDCbTvvxewM6bNoPqfJQmsw6AVvP0Zp3TZ2rm6c4qc/D7sWmB93TG58g6ALDI+8bVYbeTWYeog+NRGlbhYYn59/a5tg4QpNYB2mDTAn9UR4gteS1KaK9M/o5YnetbB6jZmXyO0mTWAdA+zh7eNGN8Zm9y6wBBah2gDTYt8F7m6a6LYnxjHQKYC7cM37POsUJjNq6uEkaDPL6pZxUeFvrWARYwPrM/uXWA4DFPpa7f2gU+PMDJCy4I8GZkHWCFJm5cXeVc5Rn33mTWAdA6fesAC3i93p/cOsCC1DpA022yAu/p3VRuHQCYG0ymmfzcrr6rcRtXVwkbWjPrHEuwCo+9CU+A9jLKNwt7VLAH4RroZQ7e0x6MRtqkwKd1hdhUUYxz6wyA9GrW1OuZ743duLrKsNsZSbq0zrFEZh0ArdG3DrCA8r5/uXWAILUO0HTbPMjJmscXZ7SXx7nrub51ACOZdYAlWIVH7cLc8RPrHAso8PuXWwcIDsMCF2qySYE/qivEhtjNDhcGk+mZ/J753viNq6uE/26Pb/Qz6wBovL51gAWMz9jIrQMsSK0DNFmMBf6FdQAgrKZmxjFWadPG1VUy6wBLsAqPunn6vae8G3A2B9+3DtBkMY7Q5NYBAJWnznjZKHZXazaurhJW4Z9Z51gisw6AZgpH2XraTE+Bt5NbBwiOWbSoT4wFHjDlfHTmVr7n8vcpsw6wBKvwqEvfOsACxmds5dYBFqTWAZqKAg9swPnojCSdhVuorRfuQrAKj8YL16Wn1jkWUN4NOXvzxHGSNYmxwN9YB0CrjeR3dObS2YXbg8w6wBKswqNqfesAd4ysA8DNRv4nPJW1HtEV+KIY31hnQDuFBzZ5HZ2R/L2Im2MVHi3hafPqbVtPwHLG02JO3zpAE0VX4JOkx7mi2DvnD2ySpA/bvnH1Hpl1gCWehk2HwE4Gk2lfvu4KeiqObZZbB1jQtw7QRNEVeEncisFehdt/I+sc92Dj6j1YhUfDZdYB7uBa5MCw27lS+drgAafR1CDGAg/sWybp2DrEPdi4+rDMOsASj1mFxy7C6runoyOvuRPoSm4dYIGnMa9GiLHAswKPvRlMpqeS3rPOcY/nbFx9mONV+JF1AEStbx3gDlbfffH02sBpNBWLscAzA4+9CLf8RsYx7sMTVzeTWQdY4jA8VwDYSLh7421TvafC2HrOFncOw4IYKrJJgb+qLcVmjqwDoDUu5Gtz2F2tf+LqJhyvwmccs4YtZNYB7njGKJ9Lz60DLGCxokKbFHgvv5iswKN2g8n0XL7n3q+H3U5mHSJCmXWAJQ7kMxeccrr6PrIOgKU8rcI/ZjNrdWIs8J5LFRoggrl3iZWMrThehX+PDa3YwMg6wB2c/e6XpwIvsVhRmRhHaJQkvdQ6A5opnPc+ss7xgI95sdxJZh1gBTYA4kEOT56R+Nl1K4w1eRqj4UnUFdmkwN/UFWILbIRA5RbOe/c89z6T3wIaBcer8Mfhab/AUuEalVnnWGJkHQD38rYK37cO0ARrF/iiGN/UmGNTFHjUYST/I1p9NopVIrMOsMIH4S4QdvM3rAPU5Ez+Vt/ZvOqftwJ/xsb93W16jOR1LSk2d5gkPV7kUJmwafWJdY4HcOZ7RRyvwkvSiBe3nX3FOkDVwtiBx70vjM8453CM5kA+f5ajsmmBdzMHL27BoCJhptT7ptWZ+JmvWmYdYIVjxV2KvmwdoKHO5W+873LY7XjqBVhtZB3gjg+Yhd9N1AU+SXqsUmEn4cSZ71jnWEPGbepqOV+FfxreWMbo69YB5OsR8jsL1ymPdwhjfqPZKuHu7cw6xx2ZdYCYxVzgD8QsPHYQyYkzUrnKxQtlPTLrAPc4Zx4eYZzK4+//LSN90RlZB7jjKcfnbm+jAl8U47ymHNvKrAMgTqEY5fJ3S/ouRmdqFFbhP7bOscKBpJx5+K2k1gEqlMnfxlWJ198YjawDLOHxzWkUNl2Bl6TLylNs7zBJemyEwEYiKu9SOTpzYx2i4TL5u7U8R4lvsbA66XF/zu2w2xlZh8Bmwn4FL4eRzHF87pa2KfDebpllzMJjXaEIXSiO8v6c0Zn6hb0Fnr/Px6LEb+rIOsCuFq5VHo2sA2BrHq91HJ+7hW0KfF51iB0dyOcPZKV4k7K7sOM9l8/b0XcxOrNf5/K7Ci9R4jd12IBr5kg+FxpmasFrblOFOycer3Uj6wCx2bjAF8X4StJtDVl28TRJeql1iJpxwdxBeHd/Jf8PaprjgU17FL7X3sfxKPGbiXZFbzCZnsnnqTOSdM61KXoe+8TxYDIdWYeIyTYr8JLP23oXDVhxWSpJen1JT61zxCqymXepfLKhx9+xRgsrU94WJ+6al/gj6yARiPKUsnC9+sg6xwqsvjfDyDrACjEfn7t32xb4UZUhKnIgf+M9OwtPnI3hnHKXwiawXPGU91v5Xwlusr51gDUcS7ri+LUHRVfgnc+9S6y+N4LzZ2B8hxK/nq0KvNMxGkk6TpLeyDpEVUJ5z61zxCpcBL6neMq7JJ3yAmln2O3k8vXI8VUOJH2P0xvudRjuXsbkQn736NyK1fcm8fxn+Z3BZOo5nwvbrsBLflcJnjahxC+U95jKpxthli62Oxfv81hyF87kc5PXMh8MJlNW41fLrAOsK1yzHlvnuAdPg26Q8Frj6Vjwu94L17Zo97LUbZcC7/ndUdQlnvK+vcFkejSYTK8U354Bjox0ItxejunP4ljlavzIyQZXT6XgMEl67v8sw91Cz9cszn1vpsw6wAOOJf0wXNso8ndsXeCLYnwjXxfqu6Is8UnSOxXlfSuDyfRUcZ00M3erOGavW2PY7WTy98CThzyVdDOYTM/Z5PoJ73kepQnl3fvdQvblNFAYGfTc4+aeqizy+WAy7TtZqDD3mZcvX279L4ey+d3q4tTiWtJpeMPhWpL0MkkfWOd4wGVRjFPrEHPhFzlVWYC9Hrv2kLcZnfEnjKV8zzrHDq5VHjiQ7/PnK0l6uXyOgjyTdFYUYzdjIJGU98tht5Nah0A9Ir7OXapc7MwlXbVxvGunAi9JSdK7kd9NN3MzSf2iGLuc2w8jMyNFsHL81d/8zdtf/2f/dGQc45HKM56P5P9n7yHvMzrjV9hI5fFR9tu4VHmH6oVeb45/UXW5DyMrXr9nM5XX2gtJVxZlPhSmI5WLDh7f6NzFAkPDDSbTXHH8LN7nVtKNXl/j5n+Vtiz4K/YWnajsIItW/XMPTVLMVOa8UrnQslFHraLA9+V/BWHuucoVmBvrINKrp6ueyf+q+ytfe+cdff73ftc6RlM8G3Y7fesQWC3c4blS/G8U9+ZXvv99/cd//i+sY9SmZdfAj4fdDuMzDRdG7n5snQOvnrOw1nGtu2xilSQVxXgkn0dKLvNE0lWS9DLLhz4lSe9RGJe5UUTlHZW6FnOl7oWLaN86R0zeeMR4akPM5H+TIyrg/Fz4NjlQ2QlvwtOY77VzgQ+yij7PPrz6BiVJ7zxJekf7+sJJ0jsJt5dvQgY2qrbTTJz3Ho2w0etD6xyx+MwBl7WGOOMa1SoxHZ/bdAeSPhpMphf3bdjdeYRmLpJZ+FUuFTZ7VT1ekyS9VOUTAU8V7/fnlZbdPq4LM6URCseTut+nYu3zP/2p/sMHmXWM2rTkGsjG1RYKq74fWefAJ1xLSpe9mX6jwi9yJv8n0qzyOHwoSXrXCruaJd0UxThf5xOElfz5x0n4iH1TCKr3LuU9WvNjSllivscv3nzTOgJ2MxNjY6007HbOw8lILFT4cSwpH0ymnyrxlRX4ohhfJEnvUvGX1mMt/PAmSW/+P+c7nBc9Ej/oWN+HPAwlXsNu5ya8uMW6ULE3X3vnHf3JD35gHQPbycJMNNrpTHEeK9lkxypPzkoX/2ZVM/BzTd6Ud6jXK/XzD8o71vUsPBwIEQvHfH1sncO7L/zal6wjYDuXHGvbbmHPD9c4fx7f3dhaaYEvivGV2OwF3HXNcZHNEY7Vi+HphWY+/5W/aB0Bm2N0BnOZ4jldsE2yxU2tVa/AS+UZlvzBA6VrLX/IA+J2qvLPFkt89vCvWlK5sl4AAAgDSURBVEfA5hidgSSOz3XsQAuTLpUX+PBku9OqPy8QoZW7xxG3hRc4jl1b4udf/rIefYkxmog8Z3QGixilcau+Ai8xSgOIs94bL5wmlIoSv9Rfeest6whYD6MzWCqMC3Kn0ZeDwWR6KtVU4CWpKMaZmBNFO81UrrzfWAdBvUKJb/Lm/a29eXRkHQHrYaEB9+mLRQpv6i3wC1+EP3i0yby8c9Z7S4SjQd+1zuHNy7/+W9YR8LAPw6gEsFR4Letb58AnnEg1F/gwD5/W+TUARyjvLUWJ/7RfvPmmjn77t61jYLVLjrbFOsLxuYxF+3Es1b8CP5+H54UNTUd5bzlK/Kf95XfesY6A5W7FYRPYQHiz98w6B16rvcBLUlGMR2I3M5rrVpR3iBJ/F2M0LrHBHlsJzzNhb6MTeynwklQU4zPx7g3Ncy3phPKOuVDivy32/+gXb76pr7EK780Z1yvsgGdgOLG3Ai9JRTHuixKP5uCcdywVZkZTUeL163/7besIeO398AYT2Ep4vUvFSry5vRZ4iRKPxngmyjvuEVY5T9Ty1aqfv/WW/tLhoXUMSM94WBOqMOx2Xgy7nVR0OSvXkkGBlyjxiN6zYbfTp7zjIeFZAKlafr37a3/v71pHaLvnYX4ZqEz4mWJ/4/5dSUYFXqLEI1rv8kKITYTVqr6k962zWGEV3tS1OMcbNQlPa31XjAvuUy4ZFnjpVYlv7YsaojKT9Dbzo9hWGF94Wy0dqfmt3/kH1hHaiH06qF14XUzV0mubgQvJuMBLUlGMz8W7N/h2LemIkxuwq/AzlKqFt51/9tWv6m9+4xvWMdqE8o69afO1bc+ezX+nzQu89Oqc+FTledqAJx8Pu50TXgRRlTBScybpm2rZNe8L3/r7evSlL1nHaAM22WPv2nxt26Ns/j9cFHjp1RNbTyQ9t84CqLwj9O1wMQIqN+x28mG3c6TyEeWtuAP5y899Tn/rH/Gcq5p9zCZ7WGrjtW1PPg4HI0hyVOAlqSjGL4pifCpGamDrUuXDmS6sg6D5wiPKT9SSTf0/++pX9Y1/8vvWMZqIRQe4Eq5tR2rJta1m11pYfZecFfi5MFJzIh4UMDdT+U4W9ZqpfNBJuvguF6jbsNu5CSfVfFMtuO79/K239He+9S3rGE3CogNcWjiF6zdEkd/WTNKn7qp95uXLl0Z51pMkvVNJI0kHxlGsPJd0VhTjmyTpmf9hfe2dd/T53/td6xh1+FhSxm1neDCYTFOVR/89tU1Sry/84D/p+3/wB9YxNuLsGjhTed3iAU2IwmAyPVJ5bTtTe3vdJmYq97N86hAN9wVekpKk90jlH3ab/sAvJWVFMc7nf4MCX7mZyuOYMlbc4VF4sTtT+YLXyGvfF3/0I/3xv/xXevGTn1hHWYujayCLDojaYDLtSzqV9MQ4ilfXKlfel56AF0WBn0uS3pHKGaAmr0p9qrjPUeArc63yrs6IFz/EYjCZnqp8sTtVw8r853/6U/3kX/8b/ckPfmAd5UHG18CZymvXOYsOaIrBZPpIr69tlPnSg2/QoyrwcwtFvkkvZM8lnS8r7nMU+J3MS/sFL3yI3UKZTyU15hGnX/zRj/Rf/92/1/+49XsCndE18FrSucrrF4sOaKxQ5tOFj2PDOBaeq3yDnj/0D0ZZ4OcWRmv6ivNF7FblCMd5UYxvHvqHKfBru5V0o/Jxw7mkK1700FRhzCZVufH/RNJjyzxV+OKPfqQX//m/6I//6I+so3zKnq6BM72+frHogNYKhf5En7zGxdj37nOpsgtu9LsedYFfFDa7xnB7eT53fVEU441ODPBQ4H/z619/8ebv/2Mvj0u+kjQv5rlUnj9rFQbwYjCZnkiar2TNXwClyMr95375S/2FP/3v+n//88/0v//bj/XTP/9z89X5Ggr8tcrrWK5y4eGKpz4D9wsb/efXtsVr3JHqL/jzRcJF+ZJ/btnfW7TT4mJjCvwih2X+WmE1ZdPSDgB1WFjZapw3/vAPK/3v+j//6ydf+b8/+9lXJOlXfvVX/+xz//B3/u2On/IFJR2oXyj623L9e9rIAr8oSXrzWy/zj30U+kuVq8O5pKt1xmMAAACAdTS+wN8V5ubnpX7bW8szlQVdej3GkUu6oawDAACgTq0r8JtIkt6johiz+REAAABuUOABAACAiHzWOgAAAACA9VHgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICIUOABAACAiFDgAQAAgIhQ4AEAAICI/H/Q1Ow6aoCvoAAAAABJRU5ErkJggg==" alt="BCDCOG Open Data" width="752" height="282">
+    </a>
+  </div>
+
+  <!-- Safety bar -->
+  <div class="safety-bar">Safety</div>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <nav aria-label="Page sections">
+        <p class="side-h">Index</p>
+        <ul class="index" id="indexNav">
+          <li><a href="#intro">Introduction</a></li>
+          <li><a href="#performance">Performance</a></li>
+          <li><a href="#target">Target</a></li>
+          <li><a href="#excess-speed">Excess Speed</a></li>
+          <li><a href="#strategies">Strategies</a></li>
+          <li><a href="#sources">Sources</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Jurisdiction plans">
+        <p class="side-h">Plans</p>
+        <ul class="plans">
+          <li><a href="https://h1.nu/1v0cR" target="_blank" rel="noopener">BCD Region <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+          <li><a href="https://h1.nu/1v0bJ" target="_blank" rel="noopener">Charleston <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+          <li><a href="https://cityoffollybeach.com/departments/2024_safety_action_plan.php" target="_blank" rel="noopener">Folly Beach <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+          <li><a href="https://h1.nu/1ACLl" target="_blank" rel="noopener">Moncks Corner <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+          <li><a href="https://h1.nu/1v0b8" target="_blank" rel="noopener">North Charleston <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+          <li><a href="https://h1.nu/1ACKO" target="_blank" rel="noopener">Summerville <svg class="ext" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <!-- Main content -->
+    <main>
+      <!-- INTRO -->
+      <section id="intro">
+        <h2 class="sec">Intro</h2>
+        <h3 class="lede">Improving traffic safety requires a multi-disciplinary approach.</h3>
+        <p class="copy">On average, 500 people are seriously injured or killed each year while traveling in Berkeley,
+          Charleston, and Dorchester counties. That's 500 preventable emergency room visits and funerals. We can do
+          better. Through safer, slower street design, proactive enforcement, higher standards for vehicle maintenance,
+          and improved emergency access, we can make getting home safely a matter of <em>when</em> and not <em>if</em>.
+          To get there, this will require real resource investments from the public, their elected leaders, emergency
+          responders, vehicle manufacturers, maintenance crews, traffic engineers, and transportation planners.</p>
+      </section>
+
+      <!-- PERFORMANCE -->
+      <section id="performance">
+        <h2 class="sec">Performance</h2>
+        <h3 class="lede">There are on average 72 reported crashes per day in our region.</h3>
+        <p class="copy">And that's just the crashes that end up in police crash reports. BCDCOG estimates that for
+          every 1 traffic injury that gets reported to the police, there's an additional 1.4 traffic injuries that
+          don't get reported but result in an emergency room visit. Overall, traffic injuries are the second leading
+          cause of emergency room visits within the region, accounting for 23% of all visits (second only to "falls"
+          at 28%).</p>
+
+        <div class="panel" id="perfPanel">
+          <button class="expand" title="Expand full screen" data-fs="perfPanel" aria-label="Expand chart full screen">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+          </button>
+          <p class="panel-title">Serious &amp; Fatal Injuries</p>
+
+          <!-- ▼ EMBED SLOT: Serious & Fatal Injuries (Power BI) — filters & KPI cards come from the embedded report -->
+          <div class="embed chart" data-embed="performance" data-title="Serious & Fatal Injuries — Power BI">
+            <div class="ph">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>
+              <div class="ph-t">Power BI embed</div>
+              <div class="ph-s">Set the report URL in <code>EMBEDS.performance</code> in the script below.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TARGET -->
+      <section id="target">
+        <h2 class="sec">Target</h2>
+        <h3 class="lede">Our region aims to reduce traffic fatalities by 10% between 2026 and 2030.</h3>
+        <p class="copy">The number of traffic fatalities has gradually increased in our region, from 569 deaths
+          (2014&ndash;2018) to 649 deaths (2019&ndash;2023). This 14% increase in traffic fatalities in our region
+          outpaced a 12% increase nationally. But a world with ever-increasing traffic fatalities is not inevitable.
+          Over this same time period, 83 counties across the country were able to improve traffic safety conditions and
+          reduce the number of fatalities on their streets. On average, these counties saw a 10% reduction in traffic
+          fatalities over a 5-year period. A 10% decrease in our region is possible, too, and will serve as our first
+          benchmark on our way to an ultimate target of 0 traffic fatalities.</p>
+
+        <div class="panel" id="targetPanel">
+          <button class="expand" title="Expand full screen" data-fs="targetPanel" aria-label="Expand chart full screen">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+          </button>
+          <p class="panel-title" style="margin-bottom:4px">Change in Traffic Fatalities</p>
+          <p class="panel-sub">between 2014&ndash;2018 and 2019&ndash;2023</p>
+          <!-- ▼ EMBED SLOT: Change in Traffic Fatalities (Power BI) -->
+          <div class="embed chart" data-embed="target" data-title="Change in Traffic Fatalities — Power BI">
+            <div class="ph">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><circle cx="8" cy="14" r="1.6"/><circle cx="12" cy="11" r="1.6"/><circle cx="16" cy="13" r="1.6"/><circle cx="18" cy="7" r="1.6"/></svg>
+              <div class="ph-t">Power BI embed</div>
+              <div class="ph-s">Set the report URL in <code>EMBEDS.target</code> in the script below.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EXCESS SPEED -->
+      <section id="excess-speed">
+        <h2 class="sec">Excess Speed</h2>
+        <h3 class="lede">Reducing serious and fatal injuries starts with reducing speeds.</h3>
+        <p class="copy">Excess speed was the most common contributing factor identified in police crash report
+          narratives, contributing to 25% of serious and fatal injuries. Some street segments experience isolated
+          speeding, with drivers more likely to exceed the posted speed limit on a specific day of the week or hour of
+          the day. While other street segments experience regular, sustained speeding.</p>
+
+        <div class="map-row">
+          <div class="panel" id="speedPanel">
+            <button class="expand" title="Expand full screen" data-fs="speedPanel" aria-label="Expand map full screen">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+            </button>
+            <!-- ▼ EMBED SLOT: Excess Speed map -->
+            <div class="embed map-embed" data-embed="excessSpeed" data-title="Excess Speed map">
+              <div class="ph">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3L3 5v16l6-2 6 2 6-2V3l-6 2-6-2z"/><path d="M9 3v16M15 5v16"/></svg>
+                <div class="ph-t">Map embed</div>
+                <div class="ph-s">Set the map URL in <code>EMBEDS.excessSpeed</code> in the script below.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="maplegend">
+            <h4>Number of vehicles exceeding the speed limit / day*</h4>
+            <div class="ln-scale" id="speedScale"></div>
+            <h4>Percent of vehicles exceeding the speed limit*</h4>
+            <div class="grad-wrap">
+              <div class="gradbar" style="background:linear-gradient(to bottom,#2b3fd6,#22a7c4,#37c46a,#e9e02b,#f0891f,#e02222)"></div>
+              <div class="grad-ticks"><span>0%</span><span>95%</span></div>
+            </div>
+            <p class="fine">*bi-directional traffic</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- STRATEGIES -->
+      <section id="strategies">
+        <h2 class="sec">Strategies</h2>
+        <h3 class="lede">Because safety needs surpass available funding, projects must be prioritized.</h3>
+        <p class="copy">BCDCOG prioritized high-risk corridors through a combination of crash history (weighted by
+          injury severity), excess speed, and street geometric features correlated with serious and fatal injuries.
+          Implementation of the regional safety plan will rely on expanding the number of corridor-specific traffic
+          safety projects and regionwide implementation of safety programming.</p>
+
+        <div class="map-row">
+          <div class="panel" id="stratPanel">
+            <button class="expand" title="Expand full screen" data-fs="stratPanel" aria-label="Expand map full screen">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+            </button>
+            <!-- ▼ EMBED SLOT: Strategies / high-risk network map -->
+            <div class="embed map-embed" data-embed="strategies" data-title="Strategies map">
+              <div class="ph">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3L3 5v16l6-2 6 2 6-2V3l-6 2-6-2z"/><path d="M9 3v16M15 5v16"/></svg>
+                <div class="ph-t">Map embed</div>
+                <div class="ph-s">Set the map URL in <code>EMBEDS.strategies</code> in the script below.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="maplegend">
+            <h4>Equivalent Property Damage Only (ePDO)*</h4>
+            <div class="ln-scale" id="epdoScale"></div>
+            <p class="fine">*weights crashes by injury severity</p>
+            <h4 style="margin-top:14px">Funded Traffic Safety Project</h4>
+            <div class="funded"><span class="swatch"></span></div>
+          </div>
+        </div>
+
+        <!-- ▼ Funded / planned safety projects — one record at a time, from BCDCOG_Safety_Points GeoJSON -->
+        <div class="proj-pane" id="projPane" tabindex="0" aria-roledescription="carousel" aria-label="Safety projects">
+          <div class="proj-head">
+            <div class="proj-head-main">
+              <span class="proj-head-title"><b>Project:</b> <span id="projName"></span></span>
+              <span class="proj-head-sub" id="projSub"></span>
+            </div>
+            <div class="proj-nav">
+              <button type="button" class="proj-btn" id="projPrev" aria-label="Previous project">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <span class="proj-count" id="projCount" aria-live="polite">1 / 27</span>
+              <button type="button" class="proj-btn" id="projNext" aria-label="Next project">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="proj-grid">
+            <div class="proj-cell"><div class="k">Lead Agency</div><div class="v" id="projLead"></div></div>
+            <div class="proj-cell"><div class="k">Funding</div><div class="v" id="projFunding"></div></div>
+            <div class="proj-cell"><div class="k">Anticipated Completion</div><div class="v" id="projEnd"></div></div>
+            <div class="proj-cell"><div class="k">Current Phase</div><div class="v" id="projStatus"></div></div>
+            <div class="proj-cell proj-desc"><div class="k">Description</div><div class="v" id="projDesc"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SOURCES -->
+      <section id="sources">
+        <h2 class="sec">Sources</h2>
+        <p class="copy">Crash data was retrieved from re-coded TR-310 police crash reports, exports from AASHTOWare 
+		(via SCDOT subscription) and the NHTSA FIRST database.</p>
+        <p>Emergency room visit data obtained from the SC Revenue &amp; Fiscal Affairs (SCRFA) Office.</p>
+        <p>Excess speed data calculated from StreetLight Insight and HERE datasets.</p>
+        <p>Equivalent Property Damage Only (ePDO) values calculated using FHWA method:<br>
+          <a href="https://highways.dot.gov/safety/local-rural/improving-safety-rural-local-and-tribal-roads-safety-toolkit/step-2-conduct" target="_blank" rel="noopener">https://highways.dot.gov/safety/local-rural/improving-safety-rural-local-and-tribal-roads-safety-toolkit/step-2-conduct</a>
+        </p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================================
+     EMBED URLS — paste the Power BI (publish-to-web / secure-embed) or ArcGIS
+     iframe URLs here. Leave a value as "" to keep its placeholder visible.
+
+     SIZING: chart slots are sized by ratio via --pbi-page-ratio in the CSS
+     :root above. If side bands remain, the report canvas isn't 16:9 — set
+     --pbi-page-ratio to match your Power BI page size, or reshape the canvas
+     in Power BI Desktop (Format ▸ Canvas settings ▸ Page size).
+     ========================================================================= */
+  var EMBEDS = {
+    performance: "https://app.powerbi.com/view?r=eyJrIjoiYjE4YTk5ZmItNDE2OC00ZGM3LTlmYzUtZTc2NWJkMzIzNTgxIiwidCI6ImJmYTA1YzNmLWVjNDgtNDVjOS1hODNkLTU2MTNlMDIzMTQ1MiJ9",   // Serious & Fatal Injuries  (Power BI)
+    target:      "https://app.powerbi.com/view?r=eyJrIjoiNzdhYzVjZmUtMWMyZi00ZjViLTk0YjMtY2RjM2Q3ZTI5ODRmIiwidCI6ImJmYTA1YzNmLWVjNDgtNDVjOS1hODNkLTU2MTNlMDIzMTQ1MiJ9",   // Change in Traffic Fatalities  (Power BI)  ← NOTE: same URL as performance; swap for the correct report/page
+    excessSpeed: "https://experience.arcgis.com/experience/e7f33f6686aa4d8188b5717e0965ef8d",   // Excess Speed map  (Power BI / ArcGIS)
+    strategies:  "https://experience.arcgis.com/experience/0187eeda19204451b8f46e68db58ee1c"    // High-risk network / Strategies map  (Power BI / ArcGIS)
+  };
+
+  Object.keys(EMBEDS).forEach(function(key){
+    var host = document.querySelector('[data-embed="'+key+'"]');
+    if(!host) return;
+    var url = (EMBEDS[key] || "").trim();
+    if(!url) return;
+    var f = document.createElement("iframe");
+    f.src = url;
+    f.title = host.getAttribute("data-title") || key;
+    f.setAttribute("frameborder","0");
+    f.setAttribute("allowfullscreen","true");
+    f.setAttribute("allow","fullscreen");
+    f.setAttribute("loading","lazy");
+    f.setAttribute("referrerpolicy","no-referrer-when-downgrade");
+    host.appendChild(f);
+    host.classList.add("ready");
+  });
+
+  /* ---------------- Map legends ---------------- */
+  var speedRows=[["0-1k",1],["1-5k",2],["5-10k",3],["10-20k",4],["20-30k",5],["30-50k",6.5],["50-90k",8]];
+  document.getElementById("speedScale").innerHTML = speedRows.map(function(r){
+    return '<div class="row"><span class="swatch" style="height:'+r[1]+'px;background:#e02222"></span><span>'+r[0]+'</span></div>';
+  }).join("");
+  var epdoRows=[["0-500",2,"#b5ac2a"],["500-2k",3,"#f0a41f"],["2k-4k",4,"#e88a1f"],["4k-8k",5,"#e0561f"],[">8k",6.5,"#c21414"]];
+  document.getElementById("epdoScale").innerHTML = epdoRows.map(function(r){
+    return '<div class="row"><span class="swatch" style="height:'+r[1]+'px;background:'+r[2]+'"></span><span>'+r[0]+'</span></div>';
+  }).join("");
+
+  /* ---------------- Expand-to-fullscreen ---------------- */
+  document.querySelectorAll(".expand").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var el=document.getElementById(btn.getAttribute("data-fs"));
+      if(!document.fullscreenElement){ if(el.requestFullscreen) el.requestFullscreen(); }
+      else { document.exitFullscreen(); }
+    });
+  });
+
+  /* ---------------- Scroll spy for Index ---------------- */
+  var links=[].slice.call(document.querySelectorAll("#indexNav a"));
+  var secs=links.map(function(a){ return document.querySelector(a.getAttribute("href")); });
+  function spy(){
+    var pos=window.scrollY+140, cur=0;
+    secs.forEach(function(s,i){ if(s && s.offsetTop<=pos) cur=i; });
+    // At (or near) the bottom of the page the last short section can't reach
+    // the trigger line, so force the final item active there.
+    if(window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2){
+      cur = secs.length - 1;
+    }
+    links.forEach(function(a,i){ a.parentNode.setAttribute("aria-current", i===cur?"true":"false"); });
+  }
+  window.addEventListener("scroll", spy, {passive:true});
+  spy();
+})();
+</script>
+
+<script>
+(function(){
+  "use strict";
+  var PROJECTS = [
+    {"project": "River Road Bridge", "route": "S-91 (River Road)", "loc": "Burden Creek", "lead": "SCDOT", "funding": "", "end": "2028", "status": "", "desc": "Correct structural deficiencies of the existing S-91 bridge over Burden Creek in Charleston County by replacing the existing bridge structure and constructing the roadway to meet current design and safety standards. The proposed roadway section will now", "link": "https://projectportal.scdot.gov/Burdencreekbridge"},
+    {"project": "Canterhill Swamp Bridge Replacement", "route": "S-9 (Cypress Gardens Rd)", "loc": "Canterhill Swamp", "lead": "SCDOT", "funding": "", "end": "2029", "status": "Right-of-Way Acquisition", "desc": "Replacing the existing S-9 (Cypress Gardens Rd.) bridge over Canterhill Swamp in Berkeley County and constructing the roadway to meet current design and safety standards. The proposed roadway section will provide two, 12-foot travel lanes with 2-foot pav", "link": "https://projectportal.scdot.gov/CypressGardensRdBridge"},
+    {"project": "US-17 Bridge Replacement over the Edisto River", "route": "US-17", "loc": "Edisto River", "lead": "SCDOT", "funding": "", "end": "2028", "status": "Construction", "desc": "Replace the US-17 bridge over the Edisto river in Colleton/Charleston County with a new bridge in the same location. The proposed new roadway section will provide four, 12-foot travel lanes with 6-foot paved and 4-foot grassed shoulders. Construction of", "link": "https://scdot-environmental-project-site-scdot.hub.arcgis.com/pages/us-17-br-over-edisto"},
+    {"project": "Folly Road Blvd Bridge over Wappoo Creek", "route": "SC-171 (Folly Road Blvd)", "loc": "Wappoo Creek", "lead": "SCDOT", "funding": "", "end": "TBD", "status": "", "desc": "Proposed bridge repair, rehabilitation, and preservation services for SC 171 (Folly Road Boulevard) over Wappoo Creek in Charleston County to remove current load restrictions and preserve or extend its service life. The rehabilitation work proposed inclu", "link": "https://projectportal.scdot.gov/Wappoo"},
+    {"project": "Old Pond Road over Simons Creek Bridge Replacement Project", "route": "S-1632 (Old Pond Rd)", "loc": "Simons Creek", "lead": "SCDOT", "funding": "", "end": "2028", "status": "Right-of-Way Acquisition", "desc": "Replace the existing bridge on S-1632 (Old Pond Road) Bridge Replacement over Simons Creek in Charleston County to correct structural deficiencies in the existing bridge.", "link": "https://scdot-environmental-project-site-scdot.hub.arcgis.com/pages/old-pond-road-br"},
+    {"project": "Horsefield Road over Four Hole Swamp Bridge Replacement", "route": "S-56 (Horsefield Road)", "loc": "Four Hole Swamp", "lead": "SCDOT", "funding": "", "end": "2027", "status": "Construction", "desc": "Replace the S-56 (Horseford Rd) bridge over Four Hole Swamp in Dorchester County to correct structural deficiencies of the existing bridge. The proposed roadway section will provide two, 11-foot travel lanes with 2-foot paved and 4-foot grassed shoulders", "link": "https://s-56-horseford-rd-over-four-hole-swamp-scdot.hub.arcgis.com/pages/overview-of-proejct"},
+    {"project": "US-52/ SC-402 Intersection Project", "route": "US-52", "loc": "SC-402", "lead": "SCDOT", "funding": "", "end": "", "status": "Right-of-Way Acquisition", "desc": "Address safety, congestion, and capacity at the intersection of US-52 and SC-402  in Berkeley County", "link": "https://projectportal.scdot.gov/US52SC402"},
+    {"project": "I-26/ I-95 Interchange Project", "route": "I-26", "loc": "I-95", "lead": "SCDOT", "funding": "", "end": "2027", "status": "Design-Build", "desc": "Reconstruction of the system-to-system interchange at I-26 and I-95 in Orangeburg and Dorchester counties to address traffic deficiencies at the interchange, to bring the facility up to current standards and to accommodate future lanes in each direction", "link": "https://projectportal.scdot.gov/i-26-and-i-95-design-and-reconstruction-project"},
+    {"project": "US-17 Alt/ S-13 Intersection Project", "route": "US-17 Alt", "loc": "S-13 (Central Ave)", "lead": "SCDOT", "funding": "", "end": "", "status": "Right-of-Way Acquisition", "desc": "Improve safety at the intersection of US-17 Alt/ S-13 (Central Ave) through construction of a roundabout.", "link": "https://projectportal.scdot.gov/17ARoundabout"},
+    {"project": "Savannah Highway RSA", "route": "US-17 (Savannah Hwy)", "loc": "Dupont Rd/ Stinson Dr", "lead": "Charleston County", "funding": "", "end": "2027", "status": "Right-of-Way Acquisition", "desc": "Improve traffic flow, safety, and pedestrian access at intersections along US-17 (Savannah Hwy)", "link": "https://www.savannahhighway.com/"},
+    {"project": "Savannah Highway RSA", "route": "US-17 (Savannah Hwy)", "loc": "Dupont Rd/ Stinson Dr", "lead": "Charleston County", "funding": "", "end": "2027", "status": "Right-of-Way Acquisition", "desc": "Improve traffic flow, safety, and pedestrian access at intersections along US-17 (Savannah Hwy)", "link": "https://www.savannahhighway.com/"},
+    {"project": "Savannah Highway RSA", "route": "US-17 (Savannah Hwy)", "loc": "Dupont Rd/ Stinson Dr", "lead": "Charleston County", "funding": "", "end": "2027", "status": "Right-of-Way Acquisition", "desc": "Improve traffic flow, safety, and pedestrian access at intersections along US-17 (Savannah Hwy)", "link": "https://www.savannahhighway.com/"},
+    {"project": "Savannah Highway RSA", "route": "US-17 (Savannah Hwy)", "loc": "Dupont Rd/ Stinson Dr", "lead": "Charleston County", "funding": "", "end": "2027", "status": "Right-of-Way Acquisition", "desc": "Improve traffic flow, safety, and pedestrian access at intersections along US-17 (Savannah Hwy)", "link": "https://www.savannahhighway.com/"},
+    {"project": "Main Road at Chisolm Road (S) RSA", "route": "Main Rd", "loc": "Chisolm Road (S)", "lead": "Charleston County", "funding": "", "end": "", "status": "Study", "desc": "", "link": ""},
+    {"project": "US-17 at Seewee Road RSA", "route": "US-17", "loc": "Seewee Rd", "lead": "Charleston County", "funding": "", "end": "", "status": "Study", "desc": "", "link": ""},
+    {"project": "Main Road at Mary Ann Point Road", "route": "Main Rd", "loc": "Mary Ann Point Rd", "lead": "Charleston County", "funding": "", "end": "", "status": "Study", "desc": "", "link": ""},
+    {"project": "Folly Road/ Harbor View Road Intersection Project", "route": "Folly Rd", "loc": "Harbor View Rd", "lead": "Charleston County", "funding": "", "end": "", "status": "Construction", "desc": "", "link": ""},
+    {"project": "River Landing Drive/ Seven Farms Drive Intersection Project", "route": "River Landing Dr", "loc": "Seven Farms Dr", "lead": "Berkeley County", "funding": "$2,569,098", "end": "2027", "status": "Construction", "desc": "", "link": "https://buildingberkeley.com/"},
+    {"project": "Black Tom Road Ext/ Black Tom Road", "route": "Black Tom Rd Ext", "loc": "Black Tom Rd", "lead": "Berkeley County", "funding": "", "end": "2028", "status": "Design", "desc": "Convert the existing skewed intersection to single-lane roundabout to improve traffic operations and enhance safety by reducing conflict points, slowing vehicle speeds, and decreasing the frequency and severity of crashes at both locations.", "link": "https://hub.improveblacktomrd.com/"},
+    {"project": "Black Tom Road Ext/ Cooper Store Road", "route": "Black Tom Rd Ext", "loc": "Cooper Store Rd", "lead": "Berkeley County", "funding": "", "end": "2028", "status": "Design", "desc": "Convert the existing skewed intersection to single-lane roundabout to improve traffic operations and enhance safety by reducing conflict points, slowing vehicle speeds, and decreasing the frequency and severity of crashes at both locations.", "link": "https://hub.improveblacktomrd.com/"},
+    {"project": "Royle Road Intersection Project", "route": "S-535 (Royle Rd)", "loc": "Farmington Rd/ Treeland Dr", "lead": "Berkeley County", "funding": "", "end": "", "status": "Right-of-Way Acquisition", "desc": "Improve the operational efficiency and safety of the intersection at the intersection of Royle Rd/ Farmington Rd in Berkeley County.", "link": "https://www.royleroadimprovements.com/"},
+    {"project": "Central Avenue/ Scotch Range Road Intersection Project", "route": "Central Ave", "loc": "Scotch Range Rd", "lead": "Dorchester County", "funding": "", "end": "2029", "status": "Design", "desc": "Construction of a single lane roundabout at the intersection of Central Avenue and Scotch Range Road to improve safety and traffic flow.", "link": "https://dorchestertransportation.com/all-projects-overview/scotch-range-road-at-central-avenue"},
+    {"project": "US-176/ Black Tom Road Intersection Project", "route": "US-176", "loc": "Black Tom Rd", "lead": "SCDOT", "funding": "", "end": "2026", "status": "Construction", "desc": "Improve the Intersection of US 176 and Black Tom Road by slightly realigning and shifting Black Tom Road to the south, adding turn lanes, and signalizing the intersection.", "link": "https://us-176-black-tom-rd-scdot.hub.arcgis.com/"},
+    {"project": "District 6 Bridge Maintenance Projects", "route": "SC-45 (French Santee Rd)", "loc": "Echaw Creek", "lead": "SCDOT", "funding": "", "end": "2026", "status": "Construction", "desc": "The purpose of this project is to reduce the number of load restricted bridges by performing comprehensive and cost effective bridge repairs identified at the SC 45 (French Santee Road) Bridge over Echaw Creek in Berkeley County.", "link": "https://district-6-package-1-bridge-maintenance-scdot.hub.arcgis.com/pages/explore-the-project"},
+    {"project": "SC-41/ S-100 Intersection Improvements", "route": "SC-41", "loc": "S-100 (Reflectance Rd/ Halfway Creek Rd)", "lead": "SCDOT", "funding": "", "end": "2030", "status": "Design", "desc": "Intersection safety and operational improvements on SC 41 (Hwy. 41) and S-100 (Reflectance Rd/Halfway Creek Rd.) in Berkeley County.", "link": "https://projectportal.scdot.gov/sc-41-S100-Intersection"},
+    {"project": "US-17/ Buckhall Landing Road Intersection Project", "route": "US-17", "loc": "Buckhall Landing Rd", "lead": "SCDOT", "funding": "", "end": "2028", "status": "", "desc": "Improve the US 17 at Buckhall Landing Road intersection in Charleston County through design and construction of a right-turn lane to improve safety, reduce congestion conditions, and make the Buck Hall Recreation site more accessible for the public.", "link": "https://projectportal.scdot.gov/US17BuckHall"},
+    {"project": "Stallsville Loop", "route": "Stallsville Loop", "loc": "Old Trolley/ Miles Jamison Road", "lead": "Dorchester County", "funding": "$10,472,556", "end": "2028", "status": "Right-of-Way Acquisition", "desc": "Realignment of Stallsville Loop and associated intersection improvements from its existing intersection with Old Trolley Road to align with the intersection of Old Trolley and Miles Jamison Road to reduce congestion and improve traffic flow. The proposed", "link": "https://dorchestertransportation.com/all-projects-overview/stallsville-loop"},
+  ];
+  var DASH = '<span class="muted">\u2014</span>';
+  function val(v){ return (v && String(v).trim()) ? String(v) : DASH; }
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  var i = 0, N = PROJECTS.length;
+  var elName=document.getElementById('projName'),
+      elSub=document.getElementById('projSub'),
+      elLead=document.getElementById('projLead'),
+      elFund=document.getElementById('projFunding'),
+      elEnd=document.getElementById('projEnd'),
+      elStat=document.getElementById('projStatus'),
+      elDesc=document.getElementById('projDesc'),
+      elCount=document.getElementById('projCount');
+
+  function render(){
+    var p = PROJECTS[i];
+    if(p.link){
+      elName.innerHTML = '<a href="'+esc(p.link)+'" target="_blank" rel="noopener">'+esc(p.project)+'</a>';
+    } else {
+      elName.textContent = p.project || '\u2014';
+    }
+    var sub = [p.route, p.loc].filter(Boolean).join('  \u00b7  ');
+    elSub.textContent = sub;
+    elSub.style.display = sub ? 'block' : 'none';
+
+    elLead.innerHTML = val(p.lead);
+    elFund.innerHTML = val(p.funding);
+    elEnd.innerHTML  = val(p.end);
+    elStat.innerHTML = val(p.status);
+    elDesc.innerHTML = val(p.desc);
+    elCount.textContent = (i+1) + ' / ' + N;
+  }
+  function go(d){ i = (i + d + N) % N; render(); }
+
+  document.getElementById('projPrev').addEventListener('click', function(){ go(-1); });
+  document.getElementById('projNext').addEventListener('click', function(){ go(1); });
+  document.getElementById('projPane').addEventListener('keydown', function(e){
+    if(e.key === 'ArrowLeft'){ go(-1); e.preventDefault(); }
+    else if(e.key === 'ArrowRight'){ go(1); e.preventDefault(); }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
